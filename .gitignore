@@ -1,1 +1,5 @@
-/_tmp/
+node_modules/
+.wrangler/
+dist/
+.env
+.dev.vars

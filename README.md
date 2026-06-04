@@ -1,80 +1,98 @@
 # Minimalist Web Notepad
 
-This is an open-source clone of the now-defunct notepad.cc: "a piece of paper in the cloud".
+This is a Cloudflare Workers rewrite of Pere Orga's minimalist web notepad, an
+open-source clone of the now-defunct notepad.cc: "a piece of paper in the cloud".
 
-See demo at https://notes.orga.cat or https://notes.orga.cat/whatever.
+Open `/anything`, type, and the note autosaves. Opening `/` redirects to a random
+short note name.
 
-## Installation
+## Features
 
-Make sure the web server is allowed to write to the `_tmp` directory.
+- No login, no database server, no build framework.
+- Notes are stored in Cloudflare KV.
+- `GET /note?raw` returns plain text.
+- `curl` and `Wget` clients receive raw text by default.
+- `POST /note` writes request body text, or the `text` field from
+  `application/x-www-form-urlencoded` requests.
+- Empty writes delete a note.
+- Invalid or missing note names redirect to a random 5-character note.
 
-### On Apache
+## Deploy to Cloudflare Workers
 
-You may need to enable mod_rewrite and allow `.htaccess` files in your site configuration.
-See [How To Set Up mod_rewrite for Apache](https://www.digitalocean.com/community/tutorials/how-to-set-up-mod_rewrite-for-apache-on-ubuntu-14-04).
+Install dependencies:
 
-### On Nginx
-
-To enable URL rewriting, put something like this in your configuration file:
-
-If the project resides in the root directory:
-```
-location / {
-    rewrite ^/([a-zA-Z0-9_-]+)$ /index.php?note=$1;
-}
-```
-
-If the project resides in a subdirectory:
-```
-location ~* ^/notes/([a-zA-Z0-9_-]+)$ {
-    try_files $uri /notes/index.php?note=$1;
-}
+```sh
+npm install
 ```
 
-If parameters need to be passed in Nginx (such as `?raw`), then `&$args` needs to be added to the end of the `$1` match:
-```
-location ~* ^/notes/([a-zA-Z0-9_-]+)$ {
-    try_files $uri /notes/index.php?note=$1&$args;
-}
-```
+Create a KV namespace:
 
-## Usage (CLI)
-
-Using the command-line interface you can both save and retrieve notes. Here are some examples using `curl`:
-
-Retrieve a note's content and save it to a local file:
-
-```
-curl https://example.com/notes/test > test.txt
+```sh
+npx wrangler kv namespace create NOTES
 ```
 
-Save specific text to a note:
+Put the returned namespace id into `wrangler.jsonc`:
 
+```jsonc
+"kv_namespaces": [
+  {
+    "binding": "NOTES",
+    "id": "your-kv-namespace-id"
+  }
+]
 ```
-curl https://example.com/notes/test -d 'hello,
+
+Run locally:
+
+```sh
+npm run dev
+```
+
+Deploy:
+
+```sh
+npm run deploy
+```
+
+## Configuration
+
+`NOTE_MAX_BYTES` limits note size in bytes. The default in `wrangler.jsonc` is
+`262144`.
+
+`NOTE_TTL_SECONDS` controls automatic expiration. Set it to `0` to keep notes
+until they are overwritten or deleted.
+
+## Usage
+
+Retrieve a note:
+
+```sh
+curl https://example.com/test
+```
+
+Save text:
+
+```sh
+curl https://example.com/test -d 'hello,
 
 welcome to my pad!
 '
 ```
 
-Save the content of a local file (e.g., `/etc/hosts`) to a note:
+Save a file:
 
-```
-cat /etc/hosts | curl https://example.com/notes/hosts --data-binary @-
+```sh
+cat /etc/hosts | curl https://example.com/hosts --data-binary @-
 ```
 
-## Copyright and license
+Delete a note:
+
+```sh
+curl https://example.com/test -d ''
+```
+
+## License
 
 Copyright 2012 Pere Orga <pere@orga.cat>
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this work except in compliance with the License.
-You may obtain a copy of the License at:
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Licensed under the Apache License, Version 2.0.

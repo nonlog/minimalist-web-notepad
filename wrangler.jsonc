@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "minimalist-web-notepad",
+  "account_id": "d7d7c67ac1a53a3b6d365554a6fc4016",
+  "main": "src/index.js",
+  "compatibility_date": "2026-06-04",
+  "observability": {
+    "enabled": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "NOTES",
+      "id": "fd3d91b7249b45bc9a40ff5e579776df"
+    }
+  ],
+  "vars": {
+    "NOTE_MAX_BYTES": "262144",
+    "NOTE_TTL_SECONDS": "0"
+  }
+}
