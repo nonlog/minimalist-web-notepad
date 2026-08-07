@@ -38,11 +38,27 @@ function htmlResponse(html){return textResponse(html,200,"text/html")}
 function textResponse(body,status,type){return new Response(body,{status,headers:commonHeaders({"Content-Type":`${type}; charset=utf-8`})})}
 function commonHeaders(extra={}){return{"Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow",...extra}}
 
+export function getMarkdownListEdit(value,selectionStart,selectionEnd){
+  if(selectionStart!==selectionEnd)return null;
+  const lineStart=value.lastIndexOf("\n",Math.max(0,selectionStart-1))+1;
+  const nextBreak=value.indexOf("\n",selectionStart),lineEnd=nextBreak===-1?value.length:nextBreak;
+  const beforeLine=value.slice(0,lineStart),fences=beforeLine.match(/^\s*```/gm);
+  if(fences&&fences.length%2===1)return null;
+  const line=value.slice(lineStart,lineEnd),cursorInLine=selectionStart-lineStart,beforeCursor=line.slice(0,cursorInLine),afterCursor=line.slice(cursorInLine);
+  const match=beforeCursor.match(/^(\s*)(?:(\d+)([.)])|([-+*]))\s+(\[(?: |x|X)\]\s+)?(.*)$/);
+  if(!match)return null;
+  const indent=match[1],ordered=match[2]!==undefined,delimiter=match[3]||"",bullet=match[4]||"",task=match[5]||"",content=match[6];
+  if(/^\s*$/.test(content+afterCursor))return{start:lineStart,end:lineEnd,text:indent,cursor:lineStart+indent.length};
+  const marker=ordered?`${Number(match[2])+1}${delimiter}`:bullet,nextTask=task?"[ ] ":"",insert=`\n${indent}${marker} ${nextTask}`;
+  return{start:selectionStart,end:selectionEnd,text:insert,cursor:selectionStart+insert.length};
+}
+
 function renderPage(note,text){
   const safeNote=escapeHtml(note),safeText=escapeHtml(text);
   return String.raw`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeNote}</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><style>
 :root{color-scheme:light dark}*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:#ebeef1}.container{position:absolute;inset:20px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0}.toolbar{display:flex;justify-content:flex-end;gap:4px}.view-button{padding:5px 9px;border:1px solid transparent;border-radius:6px;background:transparent;color:#5b6472;font:12px/1.2 system-ui;cursor:pointer}.view-button[aria-pressed="true"]{border-color:#cfd5dc;background:#fff;color:#1f2937}.workspace{display:grid;flex:1;min-width:0;min-height:0}.workspace[data-mode="edit"] #preview,.workspace[data-mode="preview"] #content{display:none}.workspace[data-mode="split"]{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}#content,#preview{width:100%;height:100%;min-width:0;min-height:0;margin:0;overflow:auto;border:1px solid #ddd;background:#fff;color:#111827}#content{padding:20px;resize:none;outline:none;font:16px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}#preview{padding:20px 28px 40px;font:16px/1.65 system-ui;overflow-wrap:anywhere}#preview:empty:before{content:"Nothing to preview";color:#9ca3af}#preview>:first-child{margin-top:0}#preview>:last-child{margin-bottom:0}#preview h1,#preview h2,#preview h3{line-height:1.25}#preview h1{font-size:2em}#preview h2{font-size:1.55em;border-bottom:1px solid #e5e7eb;padding-bottom:.25em}#preview h3{font-size:1.25em}#preview p,#preview ul,#preview ol,#preview blockquote,#preview pre{margin:0 0 1em}#preview blockquote{padding-left:1em;border-left:3px solid #cbd5e1;color:#5b6472}#preview code{padding:.12em .35em;border-radius:4px;background:#f1f5f9;font:0.92em/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}#preview pre{padding:14px 16px;overflow:auto;border-radius:6px;background:#f1f5f9}#preview pre code{padding:0;background:transparent}#preview a{color:#2563eb}#printable{display:none}@media(max-width:760px){.container{inset:10px}.toolbar{justify-content:center}.workspace[data-mode="split"]{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}}@media(prefers-color-scheme:dark){body{background:#333b4d}.view-button{color:#b9c1cd}.view-button[aria-pressed="true"]{border-color:#596274;background:#24262b;color:#fff}#content,#preview{border-color:#495265;background:#24262b;color:#fff}#preview h2{border-bottom-color:#495265}#preview blockquote{border-left-color:#64748b;color:#cbd5e1}#preview code,#preview pre{background:#17191d}#preview pre code{background:transparent}#preview a{color:#93c5fd}}@media print{.container{display:none}#printable{display:block;white-space:pre-wrap;word-break:break-word}}
 </style></head><body><div class="container"><div class="toolbar" role="toolbar" aria-label="View mode"><button class="view-button" data-mode-button="edit" aria-pressed="true">Edit</button><button class="view-button" data-mode-button="split" aria-pressed="false">Split</button><button class="view-button" data-mode-button="preview" aria-pressed="false">Preview</button></div><div class="workspace" data-mode="edit"><textarea id="content" spellcheck="false" aria-label="Note editor">${safeText}</textarea><article id="preview" aria-label="Markdown preview"></article></div></div><pre id="printable">${safeText}</pre><script>
+${getMarkdownListEdit.toString()}
 const textarea=document.getElementById("content"),printable=document.getElementById("printable"),preview=document.getElementById("preview"),workspace=document.querySelector(".workspace"),buttons=[...document.querySelectorAll("[data-mode-button]")],modeKey="minimalist-web-notepad:view-mode";let saved=textarea.value,inFlight=false,timer=0,renderQueued=false;
 function scheduleUpload(delay=700){clearTimeout(timer);timer=setTimeout(uploadContent,delay)}
 async function uploadContent(){if(inFlight||saved===textarea.value)return;const next=textarea.value;inFlight=true;try{const body=new URLSearchParams({text:next}),r=await fetch(location.href,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded; charset=UTF-8"},body});if(!r.ok)throw new Error("Save failed");saved=next;printable.textContent=next}catch{scheduleUpload(1000)}finally{inFlight=false;if(saved!==textarea.value)scheduleUpload(200)}}
@@ -55,7 +71,17 @@ function blockStart(line){return /^\s*\x60\x60\x60/.test(line)||/^(#{1,6})\s+/.t
 function listItem(line){let m=line.match(/^\s{0,3}[-+*]\s+(.*)$/);if(m)return{ordered:false,text:m[1]};m=line.match(/^\s{0,3}\d+[.)]\s+(.*)$/);return m?{ordered:true,text:m[1]}:null}
 function inline(parent,text){const re=/(\x60[^\x60\n]+\x60|\[[^\]\n]+\]\([^\s)]+\)|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|\*[^*\n]+\*|_[^_\n]+_)/g;let at=0;for(const m of text.matchAll(re)){if(m.index>at)parent.append(document.createTextNode(text.slice(at,m.index)));const t=m[0];if(t.charCodeAt(0)===96){const el=document.createElement("code");el.textContent=t.slice(1,-1);parent.append(el)}else if(t.startsWith("[")){const x=t.match(/^\[([^\]]+)\]\(([^)]+)\)$/),href=x?safeHref(x[2]):"";if(x&&href){const a=document.createElement("a");a.href=href;a.rel="noopener noreferrer";inline(a,x[1]);parent.append(a)}else parent.append(document.createTextNode(t))}else{const el=document.createElement(t.startsWith("**")||t.startsWith("__")?"strong":t.startsWith("~~")?"del":"em"),n=t.startsWith("**")||t.startsWith("__")||t.startsWith("~~")?2:1;inline(el,t.slice(n,-n));parent.append(el)}at=m.index+t.length}if(at<text.length)parent.append(document.createTextNode(text.slice(at)))}
 function safeHref(v){try{const u=new URL(v,location.href);return["http:","https:","mailto:"].includes(u.protocol)?u.href:""}catch{return""}}
-textarea.addEventListener("input",()=>{printable.textContent=textarea.value;scheduleUpload();schedulePreview()});textarea.addEventListener("scroll",syncPreviewScroll,{passive:true});for(const b of buttons)b.addEventListener("click",()=>setMode(b.dataset.modeButton));window.addEventListener("beforeprint",()=>{printable.textContent=textarea.value});setMode(storedMode()||"edit",false);
+function editorChanged(){printable.textContent=textarea.value;scheduleUpload();schedulePreview()}
+function handleListEnter(event){
+  if(event.key!=="Enter"||event.isComposing||event.altKey||event.ctrlKey||event.metaKey)return;
+  const edit=getMarkdownListEdit(textarea.value,textarea.selectionStart,textarea.selectionEnd);
+  if(!edit)return;
+  event.preventDefault();
+  textarea.setRangeText(edit.text,edit.start,edit.end,"preserve");
+  textarea.setSelectionRange(edit.cursor,edit.cursor);
+  editorChanged();
+}
+textarea.addEventListener("keydown",handleListEnter);textarea.addEventListener("input",editorChanged);textarea.addEventListener("scroll",syncPreviewScroll,{passive:true});for(const b of buttons)b.addEventListener("click",()=>setMode(b.dataset.modeButton));window.addEventListener("beforeprint",()=>{printable.textContent=textarea.value});setMode(storedMode()||"edit",false);
 </script></body></html>`;
 }
 function escapeHtml(v){return v.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
