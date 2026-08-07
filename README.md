@@ -10,6 +10,8 @@ short note name.
 
 - No login, no database server, no build framework.
 - Notes are stored in Cloudflare KV.
+- Markdown `Edit`, `Split`, and `Preview` modes render entirely in the browser.
+- `Enter` or `Shift+Enter` continues ordered, unordered, and task lists; an empty list item exits the list.
 - `GET /note?raw` returns plain text.
 - `curl` and `Wget` clients receive raw text by default.
 - `POST /note` writes request body text, or the `text` field from

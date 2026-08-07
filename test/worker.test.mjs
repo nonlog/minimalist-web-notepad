@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { handleRequest } from "../src/index.js";
+import { getMarkdownListEdit, handleRequest } from "../src/index.js";
 
 test("root redirects to a random note path", async () => {
   const response = await handleRequest(new Request("https://example.com/"), env());
@@ -52,6 +52,50 @@ test("renders stored text safely in the page", async () => {
   assert.doesNotMatch(html, /<textarea[^>]*><script>/);
 });
 
+test("renders valid client-side Markdown list shortcut code", async () => {
+  const response = await handleRequest(new Request("https://example.com/shortcuts"), env());
+  const html = await response.text();
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+
+  assert.ok(script);
+  assert.doesNotThrow(() => new Function(script));
+  assert.match(script, /addEventListener\("keydown",handleListEnter\)/);
+});
+
+test("continues ordered Markdown lists with the next number", () => {
+  const value = "1. first";
+  const edit = getMarkdownListEdit(value, value.length, value.length);
+
+  assert.ok(edit);
+  assert.equal(applyEdit(value, edit), "1. first\n2. ");
+  assert.equal(edit.cursor, "1. first\n2. ".length);
+});
+
+test("continues unordered and task Markdown lists", () => {
+  const bullet = "  - item";
+  const bulletEdit = getMarkdownListEdit(bullet, bullet.length, bullet.length);
+  assert.ok(bulletEdit);
+  assert.equal(applyEdit(bullet, bulletEdit), "  - item\n  - ");
+
+  const task = "- [x] done";
+  const taskEdit = getMarkdownListEdit(task, task.length, task.length);
+  assert.ok(taskEdit);
+  assert.equal(applyEdit(task, taskEdit), "- [x] done\n- [ ] ");
+});
+
+test("exits a Markdown list from an empty item", () => {
+  const value = "1. first\n2. ";
+  const edit = getMarkdownListEdit(value, value.length, value.length);
+
+  assert.ok(edit);
+  assert.equal(applyEdit(value, edit), "1. first\n");
+});
+
+test("does not continue list-looking text inside fenced code", () => {
+  const value = "```\n1. code";
+  assert.equal(getMarkdownListEdit(value, value.length, value.length), null);
+});
+
 test("rejects oversized notes", async () => {
   const bindings = env({ NOTE_MAX_BYTES: "3" });
   const response = await handleRequest(
@@ -64,6 +108,10 @@ test("rejects oversized notes", async () => {
 
   assert.equal(response.status, 413);
 });
+
+function applyEdit(value, edit) {
+  return value.slice(0, edit.start) + edit.text + value.slice(edit.end);
+}
 
 function env(overrides = {}) {
   return {
