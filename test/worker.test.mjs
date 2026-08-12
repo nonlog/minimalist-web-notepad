@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getMarkdownListEdit, handleRequest } from "../src/index.js";
+import { getMarkdownListEdit, handleRequest, isMarkdownHorizontalRule } from "../src/index.js";
 
 test("root redirects to a random note path", async () => {
   const response = await handleRequest(new Request("https://example.com/"), env());
@@ -52,7 +52,7 @@ test("renders stored text safely in the page", async () => {
   assert.doesNotMatch(html, /<textarea[^>]*><script>/);
 });
 
-test("renders valid client-side Markdown list shortcut code", async () => {
+test("renders valid client-side Markdown editor code", async () => {
   const response = await handleRequest(new Request("https://example.com/shortcuts"), env());
   const html = await response.text();
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
@@ -60,6 +60,18 @@ test("renders valid client-side Markdown list shortcut code", async () => {
   assert.ok(script);
   assert.doesNotThrow(() => new Function(script));
   assert.match(script, /addEventListener\("keydown",handleListEnter\)/);
+  assert.match(script, /isMarkdownHorizontalRule\(line\).*createElement\("hr"\)/s);
+  assert.ok(script.indexOf("const fence=") < script.indexOf("if(isMarkdownHorizontalRule(line))"));
+});
+
+test("recognizes Markdown horizontal rules", () => {
+  for (const line of ["---", "***", "___", "- - -", "* * *", "_ _ _", "  ----  "]) {
+    assert.equal(isMarkdownHorizontalRule(line), true, line);
+  }
+
+  for (const line of ["--", "__", "**", "- item", "--- text", "    ---"]) {
+    assert.equal(isMarkdownHorizontalRule(line), false, line);
+  }
 });
 
 test("continues ordered Markdown lists with the next number", () => {
