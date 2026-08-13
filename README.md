@@ -10,7 +10,8 @@ short note name.
 
 - No login, no database server, no build framework.
 - Notes are stored in Cloudflare KV.
-- Markdown `Edit`, `Split`, and `Preview` modes render entirely in the browser.
+- Markdown `Edit`, `Split`, and `Preview` modes render entirely in the browser; the selected mode is stored per note in KV and defaults to `Edit`.
+- Nested Markdown lists are rendered by indentation.
 - `Enter` or `Shift+Enter` continues ordered, unordered, and task lists; an empty list item exits the list.
 - `GET /note?raw` returns plain text.
 - `curl` and `Wget` clients receive raw text by default.

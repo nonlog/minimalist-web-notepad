@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getMarkdownListEdit, handleRequest, isMarkdownHorizontalRule } from "../src/index.js";
+import {
+  canUseUnderscoreEmphasis,
+  getMarkdownListEdit,
+  handleRequest,
+  isMarkdownHorizontalRule,
+  normalizeViewMode,
+  parseMarkdownListItem,
+} from "../src/index.js";
 
 test("root redirects to a random note path", async () => {
   const response = await handleRequest(new Request("https://example.com/"), env());
@@ -26,6 +33,7 @@ test("saves, reads, and deletes note content", async () => {
   assert.equal(raw.status, 200);
   assert.equal(await raw.text(), "hello\nworld");
 
+  await bindings.NOTES.put("@view:demo", "split");
   const del = await handleRequest(
     new Request("https://example.com/demo", {
       method: "POST",
@@ -35,6 +43,7 @@ test("saves, reads, and deletes note content", async () => {
     bindings,
   );
   assert.equal(del.status, 204);
+  assert.equal(await bindings.NOTES.get("@view:demo"), null);
 
   const missing = await handleRequest(new Request("https://example.com/demo?raw"), bindings);
   assert.equal(missing.status, 404);
@@ -61,6 +70,9 @@ test("renders valid client-side Markdown editor code", async () => {
   assert.doesNotThrow(() => new Function(script));
   assert.match(script, /addEventListener\("keydown",handleListEnter\)/);
   assert.match(script, /isMarkdownHorizontalRule\(line\).*createElement\("hr"\)/s);
+  assert.match(script, /function renderList\(/);
+  assert.match(script, /function persistViewMode\(/);
+  assert.doesNotMatch(script, /localStorage/);
   assert.ok(script.indexOf("const fence=") < script.indexOf("if(isMarkdownHorizontalRule(line))"));
 });
 
@@ -72,6 +84,69 @@ test("recognizes Markdown horizontal rules", () => {
   for (const line of ["--", "__", "**", "- item", "--- text", "    ---"]) {
     assert.equal(isMarkdownHorizontalRule(line), false, line);
   }
+});
+
+test("parses nested Markdown list indentation", () => {
+  assert.deepEqual(parseMarkdownListItem("- parent"), { indent: 0, ordered: false, text: "parent" });
+  assert.deepEqual(parseMarkdownListItem("    - child"), { indent: 4, ordered: false, text: "child" });
+  assert.deepEqual(parseMarkdownListItem("\t1. child"), { indent: 4, ordered: true, text: "child" });
+  assert.equal(parseMarkdownListItem("plain text"), null);
+});
+
+test("does not treat intraword underscores as emphasis delimiters", () => {
+  const value = "de.kai_morich.serial_bluetooth_terminal";
+  const start = value.indexOf("_");
+  const end = value.indexOf("_", start + 1);
+  assert.equal(canUseUnderscoreEmphasis(value, start, end - start + 1), false);
+  assert.equal(canUseUnderscoreEmphasis("_italic_", 0, 8), true);
+  assert.equal(canUseUnderscoreEmphasis("a _word_ b", 2, 6), true);
+});
+
+test("stores view mode per note and defaults to edit", async () => {
+  const bindings = env();
+  await bindings.NOTES.put("demo", "hello");
+
+  const defaultPage = await handleRequest(new Request("https://example.com/demo"), bindings);
+  assert.match(await defaultPage.text(), /class="workspace" data-mode="edit"/);
+  assert.equal(normalizeViewMode(null), "edit");
+
+  const saveView = await handleRequest(
+    new Request("https://example.com/demo?view=1", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ mode: "split" }),
+    }),
+    bindings,
+  );
+  assert.equal(saveView.status, 204);
+  assert.equal(await bindings.NOTES.get("@view:demo"), "split");
+
+  const splitPage = await handleRequest(new Request("https://example.com/demo"), bindings);
+  const splitHtml = await splitPage.text();
+  assert.match(splitHtml, /class="workspace" data-mode="split"/);
+  assert.match(splitHtml, /data-mode-button="split" aria-pressed="true"/);
+
+  const otherPage = await handleRequest(new Request("https://example.com/other"), bindings);
+  assert.match(await otherPage.text(), /class="workspace" data-mode="edit"/);
+
+  const resetView = await handleRequest(
+    new Request("https://example.com/demo?view=1", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ mode: "edit" }),
+    }),
+    bindings,
+  );
+  assert.equal(resetView.status, 204);
+  assert.equal(await bindings.NOTES.get("@view:demo"), null);
+});
+
+test("rejects invalid view modes", async () => {
+  const response = await handleRequest(
+    new Request("https://example.com/demo?view=1", { method: "POST", body: "fullscreen" }),
+    env(),
+  );
+  assert.equal(response.status, 400);
 });
 
 test("continues ordered Markdown lists with the next number", () => {
