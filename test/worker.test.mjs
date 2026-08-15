@@ -76,6 +76,20 @@ test("renders valid client-side Markdown editor code", async () => {
   assert.ok(script.indexOf("const fence=") < script.indexOf("if(isMarkdownHorizontalRule(line))"));
 });
 
+test("includes mobile viewport and responsive layout safeguards", async () => {
+  const response = await handleRequest(new Request("https://example.com/mobile"), env());
+  const html = await response.text();
+
+  assert.match(html, /viewport-fit=cover,interactive-widget=resizes-content/);
+  assert.match(html, /safe-area-inset-top/);
+  assert.match(html, /@media\(pointer:coarse\)\{\.view-button\{min-height:44px\}\}/);
+  assert.match(html, /@media\(max-width:760px\).*grid-template-rows:minmax\(0,1fr\) minmax\(0,1fr\)/s);
+  assert.match(html, /orientation:landscape.*grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/s);
+  assert.match(html, /function syncAppHeight\(\)/);
+  assert.match(html, /visualViewport\?\.addEventListener\("resize",syncAppHeight/);
+  assert.match(html, /setMode\(initialMode,false,false\)/);
+});
+
 test("recognizes Markdown horizontal rules", () => {
   for (const line of ["---", "***", "___", "- - -", "* * *", "_ _ _", "  ----  "]) {
     assert.equal(isMarkdownHorizontalRule(line), true, line);
