@@ -3,6 +3,7 @@
   "name": "minimalist-web-notepad",
   "account_id": "d7d7c67ac1a53a3b6d365554a6fc4016",
   "main": "src/index.js",
+  "workers_dev": true,
   "compatibility_date": "2026-06-04",
   "observability": {
     "enabled": true
