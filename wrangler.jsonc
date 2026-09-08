@@ -15,6 +15,30 @@
   ],
   "vars": {
     "NOTE_MAX_BYTES": "262144",
-    "NOTE_TTL_SECONDS": "0"
+    "NOTE_TTL_SECONDS": "0",
+    "FILE_UPLOAD_HOST": "note.414222.xyz",
+    "FILE_DOWNLOAD_HOST": "file.414222.xyz",
+    "FILE_MAX_BYTES": "99614720"
+  },
+  "routes": [
+    {
+      "pattern": "note.414222.xyz",
+      "custom_domain": true
+    },
+    {
+      "pattern": "file.414222.xyz",
+      "custom_domain": true
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "TEMP_FILES",
+      "bucket_name": "minimalist-web-notepad-temp-files"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "17 * * * *"
+    ]
   }
 }

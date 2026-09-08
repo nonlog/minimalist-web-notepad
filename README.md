@@ -10,6 +10,7 @@ short note name.
 
 - No login, no database server, no build framework.
 - Notes are stored in Cloudflare KV.
+- Temporary file sharing uses Cloudflare R2: uploads are private behind Cloudflare Access, while random download links on `file.414222.xyz` are public until their 1 hour / 24 hour / 7 day expiry.
 - Markdown `Edit`, `Split`, and `Preview` modes render entirely in the browser; the selected mode is stored per note in KV and defaults to `Edit`.
 - Nested Markdown lists are rendered by indentation.
 - `Enter` or `Shift+Enter` continues ordered, unordered, and task lists; an empty list item exits the list.
@@ -28,13 +29,14 @@ Install dependencies:
 npm install
 ```
 
-Create a KV namespace:
+Create a KV namespace and an R2 bucket:
 
 ```sh
 npx wrangler kv namespace create NOTES
+npx wrangler r2 bucket create minimalist-web-notepad-temp-files
 ```
 
-Put the returned namespace id into `wrangler.jsonc`:
+Put the returned KV namespace id into `wrangler.jsonc`:
 
 ```jsonc
 "kv_namespaces": [
@@ -64,6 +66,10 @@ npm run deploy
 
 `NOTE_TTL_SECONDS` controls automatic expiration. Set it to `0` to keep notes
 until they are overwritten or deleted.
+
+`FILE_MAX_BYTES` limits temporary uploads. Production is set to 95 MiB so file uploads stay below the Worker request-body limit on lower-tier plans. `FILE_UPLOAD_HOST` and `FILE_DOWNLOAD_HOST` define the protected upload host and isolated download host.
+
+The Worker runs an hourly cron to remove expired temporary objects. The R2 bucket also has an 8-day lifecycle rule as a safety net. Cloudflare Access should protect `/share` and `/api/share` on the note host; the Worker deliberately does not expose those endpoints on `workers.dev`.
 
 ## Usage
 

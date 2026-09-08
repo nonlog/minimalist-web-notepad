@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canUseUnderscoreEmphasis,
+  cleanupExpiredFiles,
   getMarkdownListEdit,
   handleRequest,
   isMarkdownHorizontalRule,
   normalizeViewMode,
   parseMarkdownListItem,
+  sanitizeFilename,
 } from "../src/index.js";
 
 test("root redirects to a random note path", async () => {
@@ -82,12 +84,118 @@ test("includes mobile viewport and responsive layout safeguards", async () => {
 
   assert.match(html, /viewport-fit=cover,interactive-widget=resizes-content/);
   assert.match(html, /safe-area-inset-top/);
-  assert.match(html, /@media\(pointer:coarse\)\{\.view-button\{min-height:44px\}\}/);
+  assert.match(html, /@media\(pointer:coarse\)\{\.view-button,\.share-link\{min-height:44px\}\}/);
   assert.match(html, /@media\(max-width:760px\).*grid-template-rows:minmax\(0,1fr\) minmax\(0,1fr\)/s);
   assert.match(html, /orientation:landscape.*grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/s);
   assert.match(html, /function syncAppHeight\(\)/);
   assert.match(html, /visualViewport\?\.addEventListener\("resize",syncAppHeight/);
   assert.match(html, /setMode\(initialMode,false,false\)/);
+});
+
+test("serves the protected file-share UI only on the note host", async () => {
+  const bindings = env();
+  const response = await handleRequest(new Request("https://note.414222.xyz/share"), bindings);
+  const html = await response.text();
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+
+  assert.equal(response.status, 200);
+  assert.match(html, /Temporary file share/);
+  assert.match(html, /95 MiB/);
+  assert.match(html, /value="1h"/);
+  assert.match(html, /value="24h" selected/);
+  assert.match(html, /value="7d"/);
+  assert.ok(script);
+  assert.doesNotThrow(() => new Function(script));
+
+  const bypass = await handleRequest(new Request("https://minimalist-web-notepad.example.workers.dev/share"), bindings);
+  assert.equal(bypass.status, 404);
+});
+
+test("uploads to R2 and downloads from the isolated file host", async () => {
+  const bindings = env();
+  const upload = await handleRequest(
+    new Request("https://note.414222.xyz/api/share?ttl=1h&name=hello%20world.txt", {
+      method: "PUT",
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      body: "hello file",
+    }),
+    bindings,
+  );
+
+  assert.equal(upload.status, 200);
+  const data = await upload.json();
+  assert.match(data.url, /^https:\/\/file\.414222\.xyz\/f\/[0-9a-z]+-[0-9a-f]{32}\/hello%20world\.txt$/);
+  assert.equal(data.markdown, `[hello world.txt](${data.url})`);
+  assert.equal(bindings.TEMP_FILES.size, 1);
+
+  const download = await handleRequest(new Request(data.url), bindings);
+  assert.equal(download.status, 200);
+  assert.equal(await download.text(), "hello file");
+  assert.equal(download.headers.get("content-type"), "text/plain");
+  assert.match(download.headers.get("content-disposition"), /^attachment;/);
+  assert.equal(download.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(download.headers.get("cache-control"), "no-store");
+
+  const head = await handleRequest(new Request(data.url, { method: "HEAD" }), bindings);
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get("content-length"), String("hello file".length));
+  assert.equal(await head.text(), "");
+});
+
+test("rejects invalid or oversized temporary-file uploads", async () => {
+  const bindings = env({ FILE_MAX_BYTES: "3" });
+  const invalidTtl = await handleRequest(
+    new Request("https://note.414222.xyz/api/share?ttl=forever&name=a.txt", { method: "PUT", body: "a" }),
+    bindings,
+  );
+  assert.equal(invalidTtl.status, 400);
+
+  const large = await handleRequest(
+    new Request("https://note.414222.xyz/api/share?ttl=1h&name=a.txt", {
+      method: "PUT",
+      headers: { "content-length": "4" },
+      body: "1234",
+    }),
+    bindings,
+  );
+  assert.equal(large.status, 413);
+  assert.equal(bindings.TEMP_FILES.size, 0);
+});
+
+test("expired file links return 410 before touching R2", async () => {
+  const bindings = env();
+  const expired = (Math.floor(Date.now() / 1000) - 1).toString(36);
+  const response = await handleRequest(
+    new Request(`https://file.414222.xyz/f/${expired}-0123456789abcdef0123456789abcdef/old.txt`),
+    bindings,
+  );
+  assert.equal(response.status, 410);
+  assert.match(await response.text(), /expired/i);
+});
+
+test("hourly cleanup deletes expired R2 keys and keeps fresh objects", async () => {
+  const r2 = new FakeR2();
+  const oldKey = "tmp/1000/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const freshKey = "tmp/2000/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  await r2.put(oldKey, "old");
+  await r2.put(freshKey, "fresh");
+
+  const deleted = await cleanupExpiredFiles({ TEMP_FILES: r2 }, 1500);
+  assert.equal(deleted, 1);
+  assert.equal(r2.has(oldKey), false);
+  assert.equal(r2.has(freshKey), true);
+});
+
+test("sanitizes filenames used in download headers and URLs", () => {
+  assert.equal(sanitizeFilename("../bad\\name\u0000.txt"), ".._bad_name.txt");
+  assert.equal(sanitizeFilename("   ...   "), "file");
+});
+
+test("note pages expose the file-share entry point", async () => {
+  const response = await handleRequest(new Request("https://note.414222.xyz/demo"), env());
+  const html = await response.text();
+  assert.match(html, /href="https:\/\/note\.414222\.xyz\/share"/);
+  assert.match(html, />Share<\/a>/);
 });
 
 test("recognizes Markdown horizontal rules", () => {
@@ -217,10 +325,70 @@ function applyEdit(value, edit) {
 function env(overrides = {}) {
   return {
     NOTES: new FakeKV(),
+    TEMP_FILES: new FakeR2(),
     NOTE_MAX_BYTES: "262144",
     NOTE_TTL_SECONDS: "0",
+    FILE_UPLOAD_HOST: "note.414222.xyz",
+    FILE_DOWNLOAD_HOST: "file.414222.xyz",
+    FILE_MAX_BYTES: String(95 * 1024 * 1024),
     ...overrides,
   };
+}
+
+class FakeR2 {
+  #values = new Map();
+
+  get size() {
+    return this.#values.size;
+  }
+
+  has(key) {
+    return this.#values.has(key);
+  }
+
+  async put(key, body, options = {}) {
+    const bytes = new Uint8Array(await new Response(body).arrayBuffer());
+    this.#values.set(key, {
+      bytes,
+      httpMetadata: options.httpMetadata || {},
+      customMetadata: options.customMetadata || {},
+    });
+  }
+
+  async get(key) {
+    const stored = this.#values.get(key);
+    if (!stored) return null;
+    return this.#object(stored, true);
+  }
+
+  async head(key) {
+    const stored = this.#values.get(key);
+    if (!stored) return null;
+    return this.#object(stored, false);
+  }
+
+  async list({ prefix = "", limit = 1000 } = {}) {
+    const objects = [...this.#values.keys()]
+      .filter((key) => key.startsWith(prefix))
+      .sort()
+      .slice(0, limit)
+      .map((key) => ({ key }));
+    return { objects, truncated: false };
+  }
+
+  async delete(keys) {
+    for (const key of Array.isArray(keys) ? keys : [keys]) this.#values.delete(key);
+  }
+
+  #object(stored, includeBody) {
+    return {
+      body: includeBody ? new Response(stored.bytes).body : undefined,
+      size: stored.bytes.byteLength,
+      httpEtag: '"fake-etag"',
+      httpMetadata: stored.httpMetadata,
+      customMetadata: stored.customMetadata,
+    };
+  }
 }
 
 class FakeKV {
